@@ -69,7 +69,7 @@ def serve_backend(
         log.add_file_handler_to_logger(root_logger, log_file)
 
     # First Party
-    from instructlab.model.backends import llama_cpp, vllm
+    from instructlab.model.backends import vllm
 
     try:
         backend = backends.get(model_path, backend)
@@ -87,22 +87,7 @@ def serve_backend(
     )
 
     backend_instance: BackendServer
-    if backend == backends.LLAMA_CPP:
-        if ctx.args:
-            ctx.fail(f"Unsupported extra arguments: {', '.join(ctx.args)}")
-        backend_instance = llama_cpp.Server(
-            api_base=ctx.obj.config.serve.api_base(),
-            model_path=model_path,
-            model_family=model_family,
-            chat_template=chat_template,
-            host=host,
-            port=port,
-            gpu_layers=gpu_layers,
-            max_ctx_size=max_ctx_size,
-            num_threads=num_threads,
-            log_file=log_file,
-        )
-    elif backend == backends.VLLM:
+    if backend == backends.VLLM:
         # Third Party
         import torch
 

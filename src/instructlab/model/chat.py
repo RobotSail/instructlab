@@ -444,24 +444,8 @@ class ConsoleChatBot:  # pylint: disable=too-many-instance-attributes
                 # We need to catch these errors before they hit the server or else it will crash.
                 # as of llama_cpp_python 0.3.z, BadRequestErrors cause the server to become unavailable
                 if self.backend_type == backends.LLAMA_CPP:
-                    total_context_size = 0
-                    # this handling can apply to llama-cpp-python only. The exception handling below should still exist for vLLM.
-                    while True:
-                        # we need to loop this. If we only remove 1 message, but it isn't enough to fit our new message in, we can hit the error
-                        # if you have 3 messages in the list, and the last one is 127 tokens with a 128 context window, you need to drop the first two in order to fit the third
-                        for msg in self.info["messages"]:
-                            total_context_size += len(msg["content"])
-                        if (
-                            self.max_ctx_size is not None
-                            and self.max_ctx_size < total_context_size
-                            and len(self.info["messages"]) > 1
-                        ):
-                            self.info["messages"] = self.info["messages"][1:]
-                            logger.debug(
-                                "Message too large for context size. Dropping from queue."
-                            )
-                        else:
-                            break
+                    raise Exception('llama-cpp is not supported')
+
                 try:
                     response = self.client.chat.completions.create(
                         model=self.model,

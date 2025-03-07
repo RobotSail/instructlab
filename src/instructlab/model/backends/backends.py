@@ -9,12 +9,12 @@ import sys
 # Local
 from ...configuration import _serve as serve_config
 from ...utils import is_model_gguf, is_model_safetensors
-from .common import CHAT_TEMPLATE_AUTO, LLAMA_CPP, VLLM
+from .common import CHAT_TEMPLATE_AUTO, VLLM
 from .server import BackendServer
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_BACKENDS = frozenset({LLAMA_CPP, VLLM})
+SUPPORTED_BACKENDS = frozenset({VLLM})
 
 
 def determine_backend(model_path: pathlib.Path) -> Tuple[str, str]:
@@ -27,7 +27,7 @@ def determine_backend(model_path: pathlib.Path) -> Tuple[str, str]:
                         - The backend to use.
                         - The reason why the backend was selected.
     """
-    if model_path.is_dir() and is_model_safetensors(model_path):
+    if (model_path.is_dir() and is_model_safetensors(model_path)) or not model_path.exists():
         if sys.platform == "linux":
             logger.debug(
                 f"Model is huggingface safetensors and system is Linux, using {VLLM} backend."
@@ -43,21 +43,8 @@ def determine_backend(model_path: pathlib.Path) -> Tuple[str, str]:
         )
 
     # Check if the model is a GGUF file
-    try:
-        is_gguf = is_model_gguf(model_path)
-    except Exception as e:
-        raise ValueError(
-            f"Failed to determine whether the model is a GGUF format: {e}"
-        ) from e
-
-    if is_gguf:
-        logger.debug(f"Model is a GGUF file, using {LLAMA_CPP} backend.")
-        return LLAMA_CPP, "model is a GGUF file."
-
     raise ValueError(
-        f"The model file {model_path} is not a GGUF format nor a directory containing huggingface safetensors files. Cannot determine which backend to use. \n"
-        f"Please use a GGUF file for {LLAMA_CPP} or a directory containing huggingface safetensors files for {VLLM}. \n"
-        "Note that vLLM is only supported on Linux."
+        "Model type is not supported. Only HuggingFace models are supported."
     )
 
 
@@ -125,7 +112,6 @@ def get_backend_from_values(
     log_file,
 ) -> BackendServer:
     # Local
-    from .llama_cpp import Server as llama_cpp_server
     from .vllm import Server as vllm_server
 
     model_path = pathlib.Path(model_path)
@@ -139,20 +125,6 @@ def get_backend_from_values(
     if not chat_template:
         chat_template = CHAT_TEMPLATE_AUTO
 
-    if backend == LLAMA_CPP:
-        # Instantiate the llama server
-        return llama_cpp_server(
-            api_base=api_base,
-            model_path=model_path,
-            chat_template=chat_template,
-            gpu_layers=gpu_layers,
-            max_ctx_size=max_ctx_size,
-            model_family=model_family,
-            host=host,
-            port=port,
-            log_file=log_file,
-            num_threads=None,  # exists only as a flag not a config
-        )
     if backend == VLLM:
         # Instantiate the vllm server
         return vllm_server(

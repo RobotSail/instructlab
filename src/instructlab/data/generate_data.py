@@ -160,7 +160,6 @@ def create_server_and_generate(
     else:
         # First Party
         from instructlab.model.backends import backends
-        from instructlab.model.backends.llama_cpp import Server as llama_cpp_server
 
         backend_instance = backends.select_backend(cfg=serve_cfg, model_path=model_name)
         if (
@@ -182,13 +181,6 @@ def create_server_and_generate(
         except Exception as exc:
             raise ValueError(f"Failed to start server: {exc}") from exc
 
-        # disable batching when running with the local llama.cpp server
-        if isinstance(backend_instance, llama_cpp_server):
-            if batch_size is not None:
-                logger.warning(
-                    "Disabling SDG batching - unsupported with llama.cpp serving"
-                )
-            batch_size = 0
 
     client = openai.OpenAI(
         base_url=api_base, api_key=api_key, http_client=http_client(http_client_params)

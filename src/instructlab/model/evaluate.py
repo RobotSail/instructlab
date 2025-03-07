@@ -796,20 +796,7 @@ def launch_server(
                     f"Based on your hardware configuration, when using vLLM, we recommend setting max-workers between {recommended_min_workers} and {recommended_max_workers} for optimal performance"
                 )
     elif backend == backends.LLAMA_CPP:
-        if eval_serve.llama_cpp.max_ctx_size < 5120:
-            eval_serve.llama_cpp.max_ctx_size = 5120
-            logger.debug(
-                "Evaluate requires a context size of >= 5120, ignoring serve configuration for max_ctx_size"
-            )
-        if max_workers is not None and isinstance(max_workers, int):
-            # llama-cpp fails fast on too many incoming requests and returns errors to client
-            recommended_workers = max(get_cpu_count() // 2, 1)
-            if max_workers > recommended_workers:
-                logger.warning(
-                    f"Based on your hardware configuration, when using llama-cpp, we recommend setting max-workers to a maximum of {recommended_workers}"
-                )
-        if gpus:
-            logger.debug("Ignoring --gpus option for llama-cpp serving")
+        raise Exception('llama cpp is not supported')
 
     eval_serve.model_path = model
 

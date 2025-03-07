@@ -143,16 +143,6 @@ def _torch_hpu_info() -> typing.Dict[str, typing.Any]:
     return d
 
 
-def _llama_cpp_info() -> typing.Dict[str, typing.Any]:
-    """llama-cpp-python capabilities"""
-    # Third Party
-    import llama_cpp
-
-    return {
-        "llama_cpp_python.version": importlib.metadata.version("llama_cpp_python"),
-        "llama_cpp_python.supports_gpu_offload": llama_cpp.llama_supports_gpu_offload(),
-    }
-
 
 def _instructlab_info():
     """InstructLab packages"""
@@ -184,5 +174,4 @@ def get_sysinfo_by_category() -> typing.Dict[str, list[tuple[str, typing.Any]]]:
     add_to_category(categories, "Torch", _torch_info())
     add_to_category(categories, "Torch", _torch_cuda_info())
     add_to_category(categories, "Torch", _torch_hpu_info())
-    add_to_category(categories, "llama_cpp_python", _llama_cpp_info())
     return categories

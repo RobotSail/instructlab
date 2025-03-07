@@ -226,7 +226,6 @@ def generate(
         checkpoint_dir = os.path.join(output_dir, "checkpoints")
 
     serve_cfg = copy.deepcopy(ctx.obj.config.generate.teacher)
-    serve_cfg.llama_cpp.llm_family = model_family or serve_cfg.llama_cpp.llm_family
     serve_cfg.vllm.llm_family = model_family or serve_cfg.vllm.llm_family
     serve_cfg.vllm.vllm_args = serve_cfg.vllm.vllm_args or []
     if gpus is not None:
