@@ -154,6 +154,12 @@ log_info "  Installed driver version: ${DRIVER_VERSION}"
 log_info "Step 6b: Installing CUDA toolkit ${CUDA_VERSION}"
 dnf install -y cuda-toolkit-${CUDA_DASHED_VERSION}
 
+# Create /usr/local/cuda symlink to version-specific directory
+if [[ -d "/usr/local/cuda-${CUDA_MAJOR_MINOR}" ]]; then
+    ln -sfn "/usr/local/cuda-${CUDA_MAJOR_MINOR}" /usr/local/cuda
+    log_info "  Created symlink: /usr/local/cuda -> /usr/local/cuda-${CUDA_MAJOR_MINOR}"
+fi
+
 # Step 6c: Install NVIDIA Container Toolkit
 log_info "Step 6c: Installing NVIDIA Container Toolkit"
 dnf install -y nvidia-container-toolkit
