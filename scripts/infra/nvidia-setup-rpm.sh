@@ -55,26 +55,33 @@ log_info "  Architecture: ${BUILD_ARCH}"
 log_info "  CUDA Version: ${CUDA_VERSION}"
 log_info "  Driver Stream: ${DRIVER_STREAM}"
 
-# Step 1: Fix kernel-headers mismatch if needed
-log_info "Step 1: Checking kernel package consistency"
+# Step 1: Fix kernel package consistency for RUNNING kernel
+log_info "Step 1: Ensuring kernel packages match RUNNING kernel"
 
-KERNEL_CORE_VERSION=$(rpm -q kernel-core --queryformat '%{VERSION}-%{RELEASE}')
-KERNEL_DEVEL_VERSION=$(rpm -q kernel-devel --queryformat '%{VERSION}-%{RELEASE}' 2>/dev/null || echo "not-installed")
-KERNEL_HEADERS_VERSION=$(rpm -q kernel-headers --queryformat '%{VERSION}-%{RELEASE}' 2>/dev/null || echo "not-installed")
+# CRITICAL: We must match the RUNNING kernel, not just any installed kernel
+RUNNING_KERNEL=$(uname -r)
+RUNNING_KERNEL_VERSION=$(echo ${RUNNING_KERNEL} | cut -d'-' -f1-2)
 
-log_info "  kernel-core: ${KERNEL_CORE_VERSION}"
-log_info "  kernel-devel: ${KERNEL_DEVEL_VERSION}"
-log_info "  kernel-headers: ${KERNEL_HEADERS_VERSION}"
+log_info "  Running kernel: ${RUNNING_KERNEL}"
 
-if [[ "${KERNEL_CORE_VERSION}" != "${KERNEL_HEADERS_VERSION}" ]]; then
-    log_warn "Kernel headers mismatch detected. Fixing..."
-    dnf downgrade -y "kernel-headers-${KERNEL_CORE_VERSION}" || \
-    dnf install -y "kernel-headers-${KERNEL_CORE_VERSION}"
+# Check if we have matching kernel-devel and kernel-headers for the running kernel
+RUNNING_KERNEL_DEVEL="kernel-devel-${RUNNING_KERNEL_VERSION}"
+RUNNING_KERNEL_HEADERS="kernel-headers-${RUNNING_KERNEL_VERSION}"
+
+# Install matching kernel-devel if not present
+if ! rpm -q "${RUNNING_KERNEL_DEVEL}" &>/dev/null; then
+    log_info "Installing kernel-devel for running kernel: ${RUNNING_KERNEL_VERSION}"
+    dnf install -y "${RUNNING_KERNEL_DEVEL}"
+else
+    log_info "  kernel-devel: ${RUNNING_KERNEL_VERSION} (OK)"
 fi
 
-if [[ "${KERNEL_DEVEL_VERSION}" == "not-installed" ]] || [[ "${KERNEL_CORE_VERSION}" != "${KERNEL_DEVEL_VERSION}" ]]; then
-    log_info "Installing matching kernel-devel package"
-    dnf install -y "kernel-devel-${KERNEL_CORE_VERSION}"
+# Install matching kernel-headers if not present or mismatched
+if ! rpm -q "${RUNNING_KERNEL_HEADERS}" &>/dev/null; then
+    log_info "Installing kernel-headers for running kernel: ${RUNNING_KERNEL_VERSION}"
+    dnf install -y "${RUNNING_KERNEL_HEADERS}"
+else
+    log_info "  kernel-headers: ${RUNNING_KERNEL_VERSION} (OK)"
 fi
 
 # Step 2: Install prerequisites
@@ -95,7 +102,8 @@ dnf install -y 'dnf-command(versionlock)' \
     dkms \
     kernel-devel \
     kernel-headers \
-    elfutils-libelf-devel
+    elfutils-libelf-devel \
+    nvtop
 
 # Step 3: Add NVIDIA CUDA repository
 log_info "Step 3: Configuring NVIDIA CUDA repository"
@@ -150,6 +158,13 @@ dnf install -y cuda-toolkit-${CUDA_DASHED_VERSION}
 log_info "Step 6c: Installing NVIDIA Container Toolkit"
 dnf install -y nvidia-container-toolkit
 
+# Step 6c2: Install cuDNN and CUDA compatibility libraries
+log_info "Step 6c2: Installing cuDNN for deep learning and CUDA compatibility"
+dnf install -y \
+    cudnn9-cuda-${CUDA_DASHED_VERSION} \
+    libcudnn8 \
+    cuda-compat-${CUDA_DASHED_VERSION}
+
 # Determine NCCL package version and install if available
 NCCL_PACKAGE=$(dnf list available --showduplicates 2>/dev/null | \
     grep "libnccl-2" | grep "${CUDA_MAJOR_MINOR}" | tail -1 | awk '{print $1}' || echo "")
@@ -159,6 +174,77 @@ if [[ -n "${NCCL_PACKAGE}" ]]; then
     dnf install -y "${NCCL_PACKAGE}"
 else
     log_warn "Could not find NCCL package for CUDA ${CUDA_MAJOR_MINOR}"
+fi
+
+# Step 6c3: Install Fabric Manager for multi-GPU NVLink/NVSwitch
+log_info "Step 6c3: Installing Fabric Manager for multi-GPU systems"
+
+# Calculate driver branch from driver version
+DRIVER_BRANCH=$(echo ${DRIVER_VERSION} | cut -d'.' -f1)
+
+log_info "  Driver branch: ${DRIVER_BRANCH}"
+log_info "  Installing nvidia-fabric-manager-${DRIVER_VERSION}"
+
+dnf install -y \
+    nvidia-fabric-manager-${DRIVER_VERSION} \
+    libnvidia-nscq-${DRIVER_BRANCH}-${DRIVER_VERSION}
+
+# Step 6d: Build DKMS modules for all installed kernels
+log_info "Step 6d: Building DKMS modules for all installed kernels"
+
+# Get NVIDIA driver version from DKMS
+NVIDIA_DKMS_VERSION=$(dkms status nvidia-open 2>/dev/null | head -1 | cut -d',' -f1 | cut -d'/' -f2 || echo "")
+
+if [[ -z "${NVIDIA_DKMS_VERSION}" ]]; then
+    log_warn "Could not determine NVIDIA DKMS version, attempting to use installed driver version"
+    NVIDIA_DKMS_VERSION=$(rpm -q nvidia-driver --queryformat '%{VERSION}' 2>/dev/null)
+fi
+
+if [[ -n "${NVIDIA_DKMS_VERSION}" ]]; then
+    log_info "  NVIDIA DKMS version: ${NVIDIA_DKMS_VERSION}"
+
+    # Build for all installed kernels
+    for KVER in $(ls /lib/modules/); do
+        if [[ -d "/lib/modules/${KVER}/build" ]]; then
+            log_info "  Building for kernel: ${KVER}"
+            dkms install "nvidia-open/${NVIDIA_DKMS_VERSION}" -k "${KVER}" 2>&1 | grep -E "(Building|Installing|already)" || true
+        fi
+    done
+else
+    log_error "Could not determine NVIDIA DKMS version"
+fi
+
+# Step 6e: Configure CUDA environment variables
+log_info "Step 6e: Configuring CUDA environment variables"
+
+cat > /etc/profile.d/cuda.sh <<'EOF'
+#!/bin/bash
+# CUDA environment configuration
+# Generated by NVIDIA installation script
+
+export PATH=/usr/local/cuda/bin${PATH:+:${PATH}}
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+export CUDA_HOME=/usr/local/cuda
+EOF
+
+chmod +x /etc/profile.d/cuda.sh
+log_info "  Created /etc/profile.d/cuda.sh"
+
+# Step 6f: Load NVIDIA kernel modules
+log_info "Step 6f: Loading NVIDIA kernel modules"
+
+if modprobe nvidia-drm 2>/dev/null; then
+    log_info "  NVIDIA kernel modules loaded successfully"
+
+    # Verify with nvidia-smi
+    if nvidia-smi &>/dev/null; then
+        GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+        log_info "  Detected ${GPU_COUNT} GPU(s)"
+    else
+        log_warn "  nvidia-smi failed - may need reboot"
+    fi
+else
+    log_warn "  Could not load NVIDIA modules - reboot required"
 fi
 
 # Step 7: Configure NVIDIA services
@@ -187,6 +273,22 @@ fi
 systemctl daemon-reload
 systemctl enable nvidia-persistenced.service
 systemctl enable nvidia-toolkit-setup.service
+systemctl enable nvidia-fabricmanager.service
+
+# Start fabric manager if NVIDIA modules are loaded
+if lsmod | grep -q nvidia; then
+    log_info "Starting Fabric Manager service"
+    systemctl start nvidia-fabricmanager.service
+
+    # Verify it started successfully
+    if systemctl is-active --quiet nvidia-fabricmanager.service; then
+        log_info "  Fabric Manager started successfully"
+    else
+        log_warn "  Fabric Manager failed to start - check logs: journalctl -u nvidia-fabricmanager"
+    fi
+else
+    log_info "  Fabric Manager will start after reboot when NVIDIA modules load"
+fi
 
 # Blacklist nouveau
 echo "blacklist nouveau" > /etc/modprobe.d/blacklist_nouveau.conf
@@ -195,16 +297,23 @@ echo "blacklist nouveau" > /etc/modprobe.d/blacklist_nouveau.conf
 log_info "Step 8: Locking package versions for reproducibility"
 
 # Lock all NVIDIA packages
-dnf versionlock delete 'nvidia-*' 'cuda-*' 'libnccl*' 'libcudnn*' 2>/dev/null || true
+dnf versionlock delete 'nvidia-*' 'cuda-*' 'libnccl*' 'libcudnn*' 'kmod-nvidia*' 2>/dev/null || true
 
 dnf versionlock add \
-    nvidia-open \
-    nvidia-driver-cuda-${DRIVER_VERSION} \
-    nvidia-driver-libs-${DRIVER_VERSION} \
-    nvidia-driver-NVML-${DRIVER_VERSION} \
-    nvidia-persistenced-${DRIVER_VERSION} \
+    nvidia-driver \
+    nvidia-driver-cuda \
+    nvidia-driver-libs \
+    nvidia-driver-NVML \
+    nvidia-persistenced \
+    nvidia-settings \
+    kmod-nvidia-open-dkms \
+    nvidia-fabric-manager \
+    libnvidia-nscq-${DRIVER_BRANCH} \
     cuda-toolkit-${CUDA_DASHED_VERSION} \
-    cuda-drivers-${DRIVER_STREAM}
+    cudnn9-cuda-${CUDA_DASHED_VERSION} \
+    libcudnn8 \
+    cuda-compat-${CUDA_DASHED_VERSION} \
+    nvidia-container-toolkit
 
 if [[ -n "${NCCL_PACKAGE}" ]]; then
     dnf versionlock add "${NCCL_PACKAGE}"
@@ -227,10 +336,25 @@ CUDA_VERSION=${CUDA_VERSION}
 DRIVER_VERSION=${DRIVER_VERSION}
 DRIVER_STREAM=${DRIVER_STREAM}
 
+# DKMS Status:
+$(dkms status 2>/dev/null || echo "DKMS not available")
+
+# Loaded Kernel Modules:
+$(lsmod | grep nvidia || echo "No NVIDIA modules loaded")
+
+# GPU Detection:
+$(nvidia-smi --query-gpu=index,name,driver_version --format=csv 2>/dev/null || echo "nvidia-smi not available or no GPUs detected")
+
 # Installed Packages:
 EOF
 
 dnf list installed | grep -E "(nvidia|cuda)" >> "${MANIFEST_FILE}" || true
+
+cat >> "${MANIFEST_FILE}" <<EOF
+
+# Version Locks:
+$(dnf versionlock list 2>/dev/null | grep -E "(nvidia|cuda|kmod)" || echo "No version locks found")
+EOF
 
 log_info "Package manifest saved to: ${MANIFEST_FILE}"
 
@@ -251,14 +375,31 @@ log_info "  Driver Type: Open Kernel Modules"
 log_info ""
 log_info "Package manifest: ${MANIFEST_FILE}"
 log_info ""
-log_warn "IMPORTANT: You must reboot the system for the driver to load."
-log_info ""
-log_info "After reboot, verify installation with:"
-log_info "  nvidia-smi"
-log_info "  nvcc --version"
+
+# Check if modules are loaded and GPUs are detected
+if nvidia-smi &>/dev/null; then
+    GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+    log_info "✓ NVIDIA driver is active and ${GPU_COUNT} GPU(s) detected"
+    log_info ""
+    log_info "Verify installation with:"
+    log_info "  nvidia-smi"
+    log_info "  source /etc/profile.d/cuda.sh && nvcc --version"
+    log_info ""
+    log_info "Note: For nvcc to work in new shells, users must either:"
+    log_info "  - Log out and log back in, OR"
+    log_info "  - Run: source /etc/profile.d/cuda.sh"
+else
+    log_warn "NVIDIA driver is installed but not loaded."
+    log_warn "You must reboot the system for the driver to load."
+    log_info ""
+    log_info "After reboot, verify installation with:"
+    log_info "  nvidia-smi"
+    log_info "  nvcc --version"
+fi
+
 log_info ""
 log_info "To replicate this installation on another node:"
 log_info "  1. Copy this script to the new node"
 log_info "  2. Run: bash $(basename $0)"
-log_info "  3. Reboot"
+log_info "  3. The driver will load automatically (or reboot if needed)"
 log_info ""

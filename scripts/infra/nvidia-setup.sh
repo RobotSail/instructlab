@@ -107,7 +107,7 @@ fi \
     && export DRIVER_STREAM=$(echo ${DRIVER_VERSION} | cut -d '.' -f 1) \
         CUDA_VERSION_ARRAY=(${CUDA_VERSION//./ }) \
         CUDA_DASHED_VERSION=${CUDA_VERSION_ARRAY[0]}-${CUDA_VERSION_ARRAY[1]} \
-        CUDA_MAJOR_MINOR=${CUDA_VERSION_ARRAY[0]}.${CUDA_VERSION_ARRAY[1]}
+        CUDA_MAJOR_MINOR=${CUDA_VERSION_ARRAY[0]}.${CUDA_VERSION_ARRAY[1]} \
         CUDA_REPO_ARCH=${TARGET_ARCH} \
     && if [ "${TARGET_ARCH}" == "aarch64" ]; then CUDA_REPO_ARCH="sbsa"; fi \
     && cp -a /etc/dnf/dnf.conf{,.tmp} && mv /etc/dnf/dnf.conf{.tmp,} \
